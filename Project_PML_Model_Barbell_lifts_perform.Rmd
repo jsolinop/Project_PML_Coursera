@@ -1,0 +1,157 @@
+---
+title: "Project - Model for predict Barbell lifts perform"
+author: "Joaquín Soliño"
+date: "03-07-2021"
+output: html_document
+---
+
+### Summary
+
+This document..... 
+
+More information in [References](#references)
+
+### Load Data {#load_data}
+
+```{r LOAD_LIBRARIES, echo=TRUE, message=FALSE}
+library(readr)
+library(dplyr)
+library(caret)
+#library(recipes)
+#library(MASS)
+```
+
+```{r LOAD_DATA_SET, echo=TRUE}
+# Create DATA folder
+wd <- getwd()
+if(!dir.exists(paste0(wd,"/DATA"))) dir.create(paste0(wd,"/DATA"))
+
+# Download training and test sets
+if(!file.exists(paste0("DATA/pml-training.csv"))) {
+        download.file(
+                "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
+                "DATA/pml-training.csv"
+        )
+}
+if(!file.exists(paste0("DATA/pml-testing.csv.csv"))) {
+        download.file(
+                "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv",
+                "DATA/pml-testing.csv"
+        )
+}
+
+pml_training <- read.csv("DATA/pml-training.csv")
+pml_test <- read.csv("DATA/pml-testing.csv")
+```
+
+
+### Exploratory Analysis 
+
+
+```{r EXPL_ANALYSIS_0}
+# dimensions of training set
+dim(pml_training)
+#dimension of test set
+dim(pml_test)
+```
+
+Let's inspect some rows:
+
+```{r EXPL_ANALYSIS_1}
+
+# Inspect some values
+pml_training[sample(nrow(pml_training),6,replace = FALSE),]
+```
+
+We find wome variables with many `NA` and `""`. `NAs` are not allowed in much models. Let's check the number o NAs and "", so we can decide how to pre-process the data (impute NAs or eliminate variable).
+
+```{r EXPL_ANALYSIS_2}
+# Percentage of variables that are NA or ""
+col_perc_nas <-
+        round(apply(pml_training, 2, function(x)
+                sum(is.na(x) | (x==""))) / nrow(pml_training) * 100,2)
+which(col_perc_nas>0)
+
+summary(col_perc_nas[col_perc_nas>0])
+
+```
+
+All the variables with missing values, has over 97.9% of missing values or "" values.
+
+
+
+### Pre-Procesing Data
+
+Preprocessing data 
+
+
+```{r PREP_DATA_1}
+# Delete variables with more than 97% of NAs or "", and Near Zero Variance
+pml_data <-
+        pml_training %>% dplyr::select(-which(col_perc_nas > 0.95)) %>% dplyr::select(-nearZeroVar(.)) %>% mutate_if(is.character, as.factor)
+
+any(is.na(pml_data))
+
+
+library(ggcorrplot)
+pml_num <- pml_data[which(sapply(pml_data,is.factor) == FALSE)]
+cor_mat <- cor(pml_num[,-c(1:4)])
+cor_mat[lower.tri(cor_mat)] <- NA
+ggcorrplot(cor_mat)
+
+
+```
+
+#### Select variables
+
+```{r PREP_DATA_2}
+# Select variables with recursive feature elimination - rfe
+library(doParallel)
+ncores <- detectCores()
+registerDoParallel(cores = ncores%/% 2)
+
+# Size of the predictors to analyze
+subsets <- c(4:10)
+
+# Number of resamples - bootstrapping
+reps <- 5
+
+set.seed(1234)
+seeds <- vector(mode = "list", length = reps + 1)
+for(i in 1:reps) {
+        seeds[[i]] <- sample.int(1000,length(subsets)+1)
+}
+seeds[[reps+1]] <- sample.int(1000,1)
+
+ctrl_rfe <- rfeControl(functions = rfFuncs, method = "boot", number = reps,
+                       returnResamp = "all", allowParallel = TRUE,verbose = FALSE,
+                       seeds = seeds)
+
+set.seed(4321)
+data_rfe <- rfe(classe ~., data = pml_data[,-c(1:4)],
+                size = subsets,
+                metric = "Accuracy",
+                rfeControl = ctrl_rfe,
+                ntree = 500)
+
+head(data_rfe$results,12)
+data_rfe$optVariables
+plot(data_rfe$perfNames)
+
+data_rfe$fit$confusion
+```
+
+
+### Build and tune Model 
+
+
+## Predictions with Test Data Set
+
+
+
+## References {#references}
+
+[Ugulino, W.](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/collaborator.jsf?p1=ugulino); [Cardador, D.](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/collaborator.jsf?p1=debora); [Vega, K.](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/collaborator.jsf?p1=katia); [Velloso, E.](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/collaborator.jsf?p1=evelloso); [Milidiu, R.](); [Fuks, H.](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/collaborator.jsf?p1=hugo) [**Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements**](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/work.jsf?p1=10335). Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6.
+Cited by 2 (Google Scholar)
+
+Read more: http:/groupware.les.inf.puc-rio.br/har#ixzz4TjpmNgaJ
