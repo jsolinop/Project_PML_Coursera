@@ -1,32 +1,62 @@
 ---
-title: "Project - Model for predict Barbell lifts perform"
+title: "Project - Model for predict Barbell Lifts perform"
 author: "Joaquín Soliño"
 date: "03-07-2021"
-output: html_document
+
+output: 
+        html_document:
+                toc: true
+                toc_float:
+                        collapsed: false
+                        toc_depth: 3
+                        number_sections: true
+                        smooth_scroll: true
+
 ---
 
-### Summary
+## Summary
 
-This document..... 
+Human Activity Recognition - HAR - has emerged in the 2000's and is gaining increasing attention by the pervasive computing research community.
 
+Today, devices such as Jawbone Up, Nike FuelBand, and Fitbit allow to collect a large amount of data about personal activity. The most regular use of this data is to mesaure how much of a particular activity is done. In fact, it rarely is used to quantify how well is done
+
+The purpose of this document is to show, step by step, the work-flow to build and fit the best model to predict how well Barbell Lifts are done.
+
+We will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
 More information in [References](#references)
+
+### Load Libraries
+
+First, we load the libraries we'll use
+
+```{r LOAD_LIBRARIES, echo=TRUE, message=FALSE, warning= FALSE}
+library(readr)          # Friendly way to read rectangular data (like 'csv')
+library(dplyr)          # Grammar of data manipulation
+
+library(ggcorrplot)     # Visualization of a correlation matrix using ggplot2
+library(MASS)           # Functions and datasets to support Venables and Ripley "Modern Applied Statistics with S"
+
+library(caret)          # Classification and Regression Training
+library(recipes)        # Create design matrices for modeling and to conduct preprocessing of variables
+library(doParallel)     # Provides parallel backend for the foreach/%dopar% function 
+library(rpart)          # Recursive partitioning for classification, regression and survival trees.
+library(rattle)         # The R Analytic Tool To Learn Easily (Rattle)
+
+```
+
 
 ### Load Data {#load_data}
 
-```{r LOAD_LIBRARIES, echo=TRUE, message=FALSE}
-library(readr)
-library(dplyr)
-library(caret)
-#library(recipes)
-#library(MASS)
-```
+Download training and test data from source, and store them in both data frames `pml_training` and `pml_testing`. 
 
 ```{r LOAD_DATA_SET, echo=TRUE}
-# Create DATA folder
+# Load data from source
+
+# If not exist, create `DATA` folder
 wd <- getwd()
 if(!dir.exists(paste0(wd,"/DATA"))) dir.create(paste0(wd,"/DATA"))
 
-# Download training and test sets
+# If not exist, download training and test sets to `DATA`folder
 if(!file.exists(paste0("DATA/pml-training.csv"))) {
         download.file(
                 "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv",
@@ -40,109 +70,450 @@ if(!file.exists(paste0("DATA/pml-testing.csv.csv"))) {
         )
 }
 
+# Load training data in pml_training data frame
 pml_training <- read.csv("DATA/pml-training.csv")
+# Load test data in pml_test data frame
 pml_test <- read.csv("DATA/pml-testing.csv")
 ```
 
 
-### Exploratory Analysis 
+## Exploratory Analysis 
 
+In this section, we'll inspect the data.
+
+* `pml_training` has `r dim(pml_training)[1]` observations and `r dim(pml_training)[2]` variable.
+* `pml_test` has `r dim(pml_test)[1]` observations and `r dim(pml_test)[2]` variable.
+
+Next, we get a glimpse of the data sets (select tabs next):
+
+### Visualize data {.tabset .tabset-fade .tabset-pills .unnumbered}
+
+#### Training set { .unnumbered}
 
 ```{r EXPL_ANALYSIS_0}
-# dimensions of training set
-dim(pml_training)
-#dimension of test set
-dim(pml_test)
+# Explore training set
+glimpse(pml_training)
 ```
 
-Let's inspect some rows:
+#### Test set { .unnumbered}
 
 ```{r EXPL_ANALYSIS_1}
-
-# Inspect some values
-pml_training[sample(nrow(pml_training),6,replace = FALSE),]
+# Explore test set
+glimpse(pml_test)
 ```
 
-We find wome variables with many `NA` and `""`. `NAs` are not allowed in much models. Let's check the number o NAs and "", so we can decide how to pre-process the data (impute NAs or eliminate variable).
+### {.unnumbered}
+
+
+### Missing values
+
+We find some variables with many `NA` and `""`. `NAs` are not allowed in much models. Let's check the number o NAs and "", so we have to decide how to pre-process the data. This means make a decision between two option:
+
+1. Impute NAs with some criteria (k-nearest neighbor, ) 
+2. Eliminate the variable
+
+The decision depends on the proportion of missing values. The higher the ratio of missing values in a variable, the more reasonable it is to discard the variable from the predictors.
 
 ```{r EXPL_ANALYSIS_2}
-# Percentage of variables that are NA or ""
-col_perc_nas <-
+# Variables with missing values or "" in Training set
+col_perc_nas_train <-
         round(apply(pml_training, 2, function(x)
-                sum(is.na(x) | (x==""))) / nrow(pml_training) * 100,2)
-which(col_perc_nas>0)
+                sum(is.na(x) | (x==""))))
 
-summary(col_perc_nas[col_perc_nas>0])
+# Number of variables with missing or "" values.
+length(col_perc_nas_train[col_perc_nas_train>0])
+
+# Summary of missing values o "" for variables with missing or "" values
+summary(col_perc_nas_train[col_perc_nas_train>0])
+```
+
+We find that `r length(col_perc_nas_train[col_perc_nas_train>0])` variables have over `r paste0(round(min(col_perc_nas_train[col_perc_nas_train>0])/nrow(pml_training) *100,2),"%")` of missing or "" values, so they will be removed in the pre-procesing step.
+
+In similar way, for test data:
+
+```{r EXPL_ANALYSIS_3}
+# Variables with missing values or "" in test set
+col_perc_nas_test <-
+        round(apply(pml_training, 2, function(x)
+                sum(is.na(x) | (x==""))))
+
+
+length(col_perc_nas_test[col_perc_nas_test>0])
+
+summary(col_perc_nas_test[col_perc_nas_test>0])
 
 ```
 
-All the variables with missing values, has over 97.9% of missing values or "" values.
+We find that `r length(col_perc_nas_test[col_perc_nas_test>0])` variables have over `r paste0(round(min(col_perc_nas_test[col_perc_nas_test>0])/nrow(pml_test) *100,2),"%")` of missing or "" values, so they will be removed in the pre-procesing step.
 
+Finally, we check that both training and test sets have the same variables with missing values 
 
-
-### Pre-Procesing Data
-
-Preprocessing data 
-
-
-```{r PREP_DATA_1}
-# Delete variables with more than 97% of NAs or "", and Near Zero Variance
-pml_data <-
-        pml_training %>% dplyr::select(-which(col_perc_nas > 0.95)) %>% dplyr::select(-nearZeroVar(.)) %>% mutate_if(is.character, as.factor)
-
-any(is.na(pml_data))
-
-
-library(ggcorrplot)
-pml_num <- pml_data[which(sapply(pml_data,is.factor) == FALSE)]
-cor_mat <- cor(pml_num[,-c(1:4)])
-cor_mat[lower.tri(cor_mat)] <- NA
-ggcorrplot(cor_mat)
-
+```{r EXPL_ANALYSIS_4}
+# Sum the number of coincidences between training and test data set. 
+sum(col_perc_nas_train[col_perc_nas_train>0]==col_perc_nas_test[col_perc_nas_test>0])
 
 ```
 
-#### Select variables
+So we can conclude that it is consistent to eliminate these variables both in the training and test data set. This procedure is done in the Pre-procesing step. 
 
-```{r PREP_DATA_2}
-# Select variables with recursive feature elimination - rfe
-library(doParallel)
-ncores <- detectCores()
-registerDoParallel(cores = ncores%/% 2)
 
-# Size of the predictors to analyze
-subsets <- c(4:10)
+## Split Data
 
-# Number of resamples - bootstrapping
-reps <- 5
+We have two data sets.
 
+* `pml_training` for training the model
+* `pml_testing` for testing the final model 
+
+We'll split `pml_training` int two sets: 70% of observations for training models and 30% for model validation. We have to assure the same proportion of `classe` (outcome) in the split. The result is stored in two variables:
+
+* `pml_train` (70%): data frame for training models
+* `pml_validation` (30%): data frame for validating model accuracy
+
+```{r SPLIT_DATA_1}
+# Split training into train and validation set with p=.7 over the outcome classe
 set.seed(1234)
-seeds <- vector(mode = "list", length = reps + 1)
-for(i in 1:reps) {
-        seeds[[i]] <- sample.int(1000,length(subsets)+1)
-}
-seeds[[reps+1]] <- sample.int(1000,1)
+# Index for split at p=0.7 over classe (outcome)
+trainInd <- createDataPartition(pml_training$classe, p = 0.7, list = F, times = 1)
 
-ctrl_rfe <- rfeControl(functions = rfFuncs, method = "boot", number = reps,
-                       returnResamp = "all", allowParallel = TRUE,verbose = FALSE,
-                       seeds = seeds)
+pml_train <- pml_training[trainInd,]            # Training data set
+pml_validation <- pml_training[-trainInd,]      # Validation data set
+```
+
+Lets check that proportions of the outcome (`classe` variable) are equal. First, Train data set...
+```{r SPLIT_DATA_2}
+prop.table(table(pml_train$classe))             # Proportion of classe in train set
+```
+
+Finally, validation data set:
+```{r SPLIT_DATA_3}
+prop.table(table(pml_validation$classe))        # Proportion of classe in validation set
+```        
+
+## Pre-Procesing Data
+
+In this step we prepare the data for the training. This process includes:
+
+* Impute missing values or remove variables
+* Remove Near Zero Variance variables
+* Create Dummy Variables (for cualitative predictors)
+* Remove Redundant Variables (high correlated)
+
+### Missing values - Near Zero Variance - Dummy Variables
+
+
+```{r PREPROC_DATA_1}
+# Delete variables with more than 97% of NAs or "", Near Zero Variance and
+# variables X (index), raw_timestamp_part_1, raw_timestamp_part_2 and num_window
+cols_missing_novalue <- c(names(pml_train[,c(1,3,4,5,7)]),names(pml_train[col_perc_nas_train>0]))
+
+recipe_obj <- recipe(formula = classe ~ ., data = pml_train) %>%
+        step_rm(all_of(cols_missing_novalue)) %>% 
+        step_nzv(all_predictors()) %>% 
+        step_dummy(all_nominal_predictors())
+
+trained_recipe <-prep(recipe_obj,training = pml_train)
+
+pml_train_recipe <- bake(trained_recipe,new_data = pml_train)
+pml_validation_recipe <- bake(trained_recipe,new_data = pml_validation)
+pml_test_recipe <- bake(trained_recipe,new_data = pml_test)
+
+```
+
+### Remove Redundant Features
+
+```{r PREPROC_DATA_2}
+# Find variables with high correlation with each other (over 0.8)
+pml_num <- pml_train_recipe[which(sapply(pml_train_recipe,is.factor) == FALSE)] # select only numeric variables
+correl_matrix <- cor(pml_num)                                 # build correlation matrix
+high_correl <- findCorrelation(correl_matrix,cutoff = 0.8)    # determine highly correlated variables
+dim(correl_matrix)
+
+#correl_matrix[lower.tri(correl_matrix)] <- NA
+ggcorrplot(correl_matrix,title = "Matrix Correlation of Variables", tl.cex = 6)
+
+correl_matrix2 <- cor(pml_num[,-high_correl])                                 # build correlation matrix
+dim(correl_matrix2)
+
+#correl_matrix2[lower.tri(correl_matrix2)] <- NA
+ggcorrplot(correl_matrix2, tl.cex = 6)
+
+```
+
+### Select variables
+
+```{r PREPROC_DATA_3, eval=FALSE, include=FALSE}
+# Select variables with recursive feature elimination function - rfe
+library(doParallel)                     # Use doParallel for multi-core processing
+ncores <- detectCores()                 # Detect the number of CPU cores
+registerDoParallel(cores = ncores)      # Register all the cores available with the foreach
+
+
+subsets <- seq(5,55, by = 5)            # Size of the predictors subsets to analyze
+
+reps <- 15                              # Number of resamples
+
+
+# rfeControl, using random forest, cross validation, and allowing Parallel mode for speedup
+ctrl_rfe <- rfeControl(functions = rfFuncs, method = "cv", number = reps,
+                       returnResamp = "all", allowParallel = TRUE,verbose = FALSE)
 
 set.seed(4321)
-data_rfe <- rfe(classe ~., data = pml_data[,-c(1:4)],
+rfe_pml_train_highcor_out <- rfe(classe ~., data = pml_train_recipe[,-high_correl],
                 size = subsets,
                 metric = "Accuracy",
-                rfeControl = ctrl_rfe,
-                ntree = 500)
+                rfeControl = ctrl_rfe)
 
-head(data_rfe$results,12)
-data_rfe$optVariables
-plot(data_rfe$perfNames)
+set.seed(4321)
+rfe_pml_train_highcor_in <- rfe(classe ~., data = pml_train_recipe,
+                size = subsets,
+                metric = "Accuracy",
+                rfeControl = ctrl_rfe2)
 
-data_rfe$fit$confusion
 ```
 
 
-### Build and tune Model 
+```{r PREPROC_DATA_4, eval=FALSE, include=FALSE}
+
+library(ggpubr)
+
+# Avaluate accuracy of 2 variants
+a <- ggplot(data = data_rfe$results, aes(x = Variables, y = Accuracy)) +
+     geom_line() +
+     scale_x_continuous(breaks = unique(data_rfe$results$Variables)) +
+     geom_point() +
+     geom_errorbar(aes(ymin = Accuracy - AccuracySD, ymax = Accuracy + AccuracySD),width = 0.2) +
+     geom_point(data = data_rfe$results %>% slice(which.max(Accuracy)), color = "red")+
+     theme_bw()
+
+
+b <- ggplot(data = data_rfe2$results, aes(x = Variables, y = Accuracy)) +
+     geom_line() +
+     scale_x_continuous(breaks = unique(data_rfe2$results$Variables)) +
+     geom_point() +
+     geom_errorbar(aes(ymin = Accuracy - AccuracySD, ymax = Accuracy + AccuracySD),width = 0.2) +
+     geom_point(data = data_rfe2$results %>% slice(which.max(Accuracy)), color = "red")+
+     theme_bw()
+
+ggarrange(a, b)
+
+data_rfe2$optVariables
+
+data_rfe2$fit$confusion
+
+confusionMatrix(result_rfe_val$pred,pml_validation_recipe$classe)
+confusionMatrix(result_rfe2_val$pred,pml_validation_recipe$classe)
+```
+
+## Build and tune Model {.tabset .tabset-fade .tabset-pills .unnumbered}
+
+We'll compare different models in terms of accuracy.
+
+### LDA {- .unnumbered}
+
+Linear Discriminant Analysis - LDA model 
+
+```{r MODEL_LDA}
+part <- 10 # num of partitions for Cross - Validation
+
+# Trainig definition
+ctrl_train <- trainControl(method = "cv", number = part,
+                           returnResamp = "final", verboseIter = FALSE,
+                           allowParallel = TRUE)
+
+# Fit model
+set.seed(4321)
+modelFit_LDA <- train(classe ~ .,data = pml_train_recipe, method = "lda",
+                      metric = "Accuracy",
+                      trControl = ctrl_train)
+
+# Final Model
+modelFit_LDA$finalModel
+
+```
+
+
+### QDA {- .unnumbered}
+
+```{r MODEL_QDA, eval=FALSE, include=FALSE}
+
+# Trainig definition
+ctrl_train <- trainControl(method = "cv", number = 10,
+                           returnResamp = "final", verboseIter = FALSE,
+                           allowParallel = TRUE)
+
+# Fit model
+set.seed(4321)
+modelFit_QDA <- train(classe ~ .,data = pml_train_recipe, method = "qda",
+                      metric = "Accuracy",
+                      trControl = ctrl_train)
+
+# Final Model
+modelFit_QDA$finalModel
+
+```
+
+
+### KNN {- .unnumbered}
+
+```{r MODEL_KNN}
+
+part <- 10 # num of partitions
+
+# Hyperparameters
+hyperpararm <- data.frame(k = c(1,2,5,10,20,40))
+
+# Trainig definition
+ctrl_train <- trainControl(method = "cv", number = part,
+                           returnResamp = "final", verboseIter = FALSE,
+                           allowParallel = TRUE)
+
+# Fit model
+set.seed(4321)
+modelFit_KNN <- train(classe ~ .,data = pml_train_recipe, method = "knn",
+                      tuneGrid = hyperpararm, metric = "Accuracy",
+                      trControl = ctrl_train)
+
+# Plot Accuracy
+ggplot(modelFit_KNN, highlight = TRUE) +
+        scale_x_continuous(breaks = hyperpararm$k) +
+        labs(title = "KNN Accuracy", x = "k") +
+        theme_bw()
+
+```
+
+### Decision Tree {- .unnumbered}
+
+
+```{r MODEL_RPART}
+
+part <- 10 # num of partitions
+reps <- 5|4  # repetitions
+
+# Hyperparameters
+hyperpararm <- expand.grid(cp = seq(0, 0.1, by= 0.02))
+set.seed(1234)
+seeds <- vector(mode = "list", length = (part * reps) + 1)
+for (i in 1:(part * reps)) {
+        seeds[[i]] <- sample.int(1000,nrow(hyperpararm) + 1)
+}
+seeds[[(part * reps)+1]] <- sample(1000, 1)
+
+# Trainig definition
+ctrl_train <- trainControl(method = "repeatedcv", number = part, repeats = reps,
+                           seeds = seeds, returnResamp = "final", verboseIter = FALSE,
+                           classProbs = TRUE,
+                           allowParallel = TRUE)
+
+# Fit model
+set.seed(4321)
+modelFit_RPART <- train(classe ~ .,data = pml_train_recipe, method = "rpart",
+                      metric = "Accuracy", tuneGrid = hyperpararm,
+                      trControl = ctrl_train)
+
+# Plot Accuracy
+fancyRpartPlot(modelFit_RPART$finalModel)
+confusionMatrix(modelFit_RPART)
+```
+
+
+
+### Random Forest {- .unnumbered}
+
+```{r MODEL_RFOREST}
+library(doParallel)                     # Use doParallel for multi-core processing
+ncores <- detectCores()                 # Detect the number of CPU cores
+registerDoParallel(cores = ncores)      # Register all the cores available with the foreach
+
+part <- 10 # num of partitions
+reps <- 5  # repetitions
+
+# Hyperparameters
+hyperpararm <- expand.grid(mtry = c(3,4,5,6,7,8,9,10),
+                        min.node.size = c(1,2,3,4,5,10,15),
+                        splitrule = "gini")
+
+set.seed(1234)
+seeds <- vector(mode = "list", length = (part * reps) + 1)
+for (i in 1:(part * reps)) {
+        seeds[[i]] <- sample.int(1000,nrow(hyperpararm) + 1)
+}
+seeds[[(part * reps)+1]] <- sample(1000, 1)
+
+# Trainig definition
+ctrl_train <- trainControl(method = "repeatedcv", number = part, repeats = reps,
+                           seeds = seeds, returnResamp = "final", verboseIter = FALSE,
+                           classProbs = TRUE, allowParallel = TRUE)
+
+# Fit model
+set.seed(4321)
+modelFit_RANGER <- train(classe ~ .,data = pml_train_recipe, method = "ranger",
+                      metric = "Accuracy", tuneGrid = hyperpararm,
+                      trControl = ctrl_train)
+
+modelFit_RANGER$finalModel
+
+# Plot Accuracy
+ggplot(modelFit_RANGER, highlight = TRUE) +
+        scale_x_continuous(breaks = 1:50) +
+        labs(title = "Evolucion del accuracy del modelo Random Fores") +
+        guides(color = guide_legend(title = "mtry"),
+               shape = guide_legend(title = "mtry")) +
+        theme_bw()
+```
+
+### Gradient Boosting {- .unnumbered}
+
+XGBoost provides a parallel tree boosting (also known as GBDT, GBM), and implements machine learning algorithms under the Gradient Boosting framework.
+
+
+```{r MODEL_GBOOST}
+library(doParallel)                     # Use doParallel for multi-core processing
+ncores <- detectCores()                 # Detect the number of CPU cores
+registerDoParallel(cores = ncores -1)      # Register all the cores available with the foreach
+
+part <- 10 # num of partitions
+reps <- 5  # repetitions
+
+# Hyperparameters
+hyperpararm <- expand.grid(interaction.depth = c(1,2),
+                        n.trees = c(500),
+                        shrinkage = c(0.01,0.05,0.1),
+                        n.minobsinnode = c(2,5,10))
+
+set.seed(1234)
+seeds <- vector(mode = "list", length = (part * reps) + 1)
+for (i in 1:(part * reps)) {
+        seeds[[i]] <- sample.int(1000,nrow(hyperpararm) + 1)
+}
+seeds[[(part * reps)+1]] <- sample(1000, 1)
+
+# Trainig definition
+ctrl_train <- trainControl(method = "repeatedcv", number = part, repeats = reps,
+                           seeds = seeds, returnResamp = "final", verboseIter = FALSE,
+                           classProbs = TRUE, allowParallel = TRUE)
+
+# Fit model
+    set.seed(4321)
+modelFit_GBOOST <- train(classe ~ .,data = pml_train_recipe, method = "gbm",
+                      metric = "Accuracy", tuneGrid = hyperpararm,
+                      trControl = ctrl_train,
+                      distribution = "multinomial",
+                      verbose = FALSE)
+
+
+modelFit_GBOOST
+
+# Plot Accuracy
+```
+
+### SVM {- .unnumbered}
+
+
+## {.unnumbered}
+
+
+
+
 
 
 ## Predictions with Test Data Set
